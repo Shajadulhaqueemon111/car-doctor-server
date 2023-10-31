@@ -1,20 +1,25 @@
 const express=require('express');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const cors=require('cors')
+const jwt=require('jsonwebtoken')
+const cookieParser=require('cookie-parser')
 require('dotenv').config()
 const app=express();
 
-const port=process.env.PORT || 5000;
+const port=process.env.PORT || 5000;  
 
 //midleware
-app.use(cors());
+app.use(cors({
+  origin:['https://car-doctor-auth-dad0e.web.app',
+          'https://car-doctor-auth-dad0e.firebaseapp.com'
+
+],
+  credentials:true
+}))
 app.use(express.json());
+app.use(cookieParser());
 
-// carDoctor
-// NfXyK0suA1ZyGdCQ
 
-// console.log(process.env.DB_USER)
-// console.log(process.env.BD_PASS)
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.BD_PASS}@cluster0.7auoehb.mongodb.net/?retryWrites=true&w=majority`;
 console.log(uri)
@@ -27,6 +32,29 @@ const client = new MongoClient(uri, {
   }
 });
 
+const logger=async(req,res,next)=>{
+  console.log('called:',req.host,req.originalurl)
+  next();
+}
+
+const verifyToken=async(req,res,next)=>{
+  const token=req.cookies?.token;
+  console.log('value of token in middleware',token)
+  if(!token){
+    return res.status(401).send({message:'unothorized'})
+  }
+  jwt.verify(token,process.env.ACCESS_TOKEN_SECRET,(err,decoded)=>{
+if(err){
+  console.log(err)
+  return res.status(401).send({message:'unothorized'})
+}
+console.log('value in the token ' ,decoded)
+req.user=decoded; 
+next()
+  })
+  
+}
+
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
@@ -38,8 +66,42 @@ async function run() {
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
+    
+    //auth related
+    // app.post('/jwt',logger,async(req,res)=>{
+    //   const user=req.body;
+    //   console.log(user)
+    //   const token=jwt.sign(user,process.env.ACCESS_TOKEN_SECRET,{expiresIn:'1h'})
+    //   res
+    //   .cookie('token',token,{
+    //     httpOnly:true,
+    //     secure:false,
+      
+    //   })
+    //   .send({success:true})
+    // })
 
-    app.get('/services',async(req,res)=>{
+    //json web token
+
+    app.post('/jwt',async(req,res)=>{
+      const user=req.body;
+      console.log('user for token',user);
+      const token=jwt.sign(user,process.env.ACCESS_TOKEN_SECRET,{expiresIn:'1h'})
+
+      res.cookie('token',token,{
+      httpOnly:true,
+      secure:true,
+
+      })
+      .send({success:true})
+    })
+    //json web token logout 
+    app.post('/logout',async(req,res)=>{
+      const user=req.body;
+     res.clearCookie('token',{maxAge:0}).send({success:true})
+    })
+    //services related 
+    app.get('/services',logger,async(req,res)=>{
         const cursor=serViceCollection.find()
         const result=await cursor.toArray()
         res.send(result)
@@ -60,8 +122,11 @@ async function run() {
 
     //booking related
 
-    app.get('/bookings',async(req,res)=>{
+    app.get('/bookings',logger,verifyToken,async(req,res)=>{
         console.log(req.query.email)
+
+        // console.log(req.cookies)
+        console.log('user in the valid token',req.user)
         let query={};
         if(req.query?.email){
             query={email:req.query.email}
